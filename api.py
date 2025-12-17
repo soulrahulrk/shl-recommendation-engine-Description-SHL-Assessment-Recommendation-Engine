@@ -103,8 +103,16 @@ async def startup_event():
     # Load vector store
     vector_store = SHLVectorStore(data_dir=data_dir)
     try:
-        vector_store.load()
-        print(f"✓ Vector store loaded: {len(vector_store.metadata)} assessments")
+        # Check if vector store exists, build if not
+        vector_store_path = Path(data_dir) / "vector_store.faiss"
+        if not vector_store_path.exists():
+            print("Building vector store for first time...")
+            vector_store.build_index()
+            vector_store.save()
+            print(f"✓ Vector store built: {len(vector_store.metadata)} assessments")
+        else:
+            vector_store.load()
+            print(f"✓ Vector store loaded: {len(vector_store.metadata)} assessments")
     except Exception as e:
         print(f"✗ Failed to load vector store: {e}")
         vector_store = None

@@ -64,10 +64,21 @@ st.markdown("""
 # Initialize session state
 @st.cache_resource
 def load_vector_store():
-    """Load vector store (cached)"""
+    """Load vector store (cached) - builds if not exists"""
     data_dir = str(Path(__file__).parent / "data")
     store = SHLVectorStore(data_dir=data_dir)
-    store.load()
+    
+    # Check if vector store exists
+    vector_store_path = Path(data_dir) / "vector_store.faiss"
+    if not vector_store_path.exists():
+        st.info("Building vector store for first time... This takes ~2 minutes.")
+        # Build index from JSON data
+        store.build_index()
+        store.save()
+        st.success("Vector store built successfully!")
+    else:
+        store.load()
+    
     return store
 
 
