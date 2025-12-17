@@ -1,10 +1,9 @@
 """
-Recommendation Pipeline
-Combines semantic search with LLM re-ranking for optimal results
+Recommendation Pipeline - combines semantic search + LLM reranking
 
-Flow:
-1. Query → Vector Store → Top-K candidates (semantic)
-2. Candidates → LLM Reranker → Final Top-10 (balanced)
+Two-stage process:
+1. Semantic search retrieves candidate assessments
+2. LLM reranks for better relevance and skill balance
 """
 
 import json
