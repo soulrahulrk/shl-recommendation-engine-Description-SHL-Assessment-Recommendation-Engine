@@ -1,10 +1,9 @@
 """
-Phase 5: FastAPI Backend for SHL Assessment Recommendations
+FastAPI Backend for SHL Assessment Recommendations
 
-Endpoints:
-- POST /recommend - Get assessment recommendations
-- GET /health - Health check
-- GET /assessments - List all assessments
+Main endpoints:
+- POST /recommend - Get recommendations
+- GET /health - Check system status
 """
 
 import os

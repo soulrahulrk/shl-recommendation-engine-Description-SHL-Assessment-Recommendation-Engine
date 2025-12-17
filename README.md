@@ -211,7 +211,6 @@ MIT License
 
 ## 🙏 Acknowledgments
 
-- [SHL](https://www.shl.com) for the assessment catalog
-- [Sentence Transformers](https://www.sbert.net/) for embeddings
-- [HuggingFace](https://huggingface.co/) for free LLM inference API
-- [Mistral AI](https://mistral.ai/) for the Mistral-7B model
+- [SHL](https://www.shl.com) for the comprehensive assessment catalog
+- [Sentence Transformers](https://www.sbert.net/) for the embedding models
+- [Groq](https://groq.com/) for providing free LLM API access
