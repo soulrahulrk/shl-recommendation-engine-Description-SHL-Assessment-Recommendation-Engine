@@ -74,8 +74,11 @@ class SHLVectorStore:
             url += "/"
         return url
     
-    def build_index(self, catalog_files: list[str]):
+    def build_index(self, catalog_files: Optional[list[str]] = None):
         """Build FAISS index from catalog files"""
+        if catalog_files is None:
+            catalog_files = ["catalog_enriched.json", "prepackaged_enriched.json"]
+        
         print("=" * 60)
         print("Building Vector Index")
         print("=" * 60)
