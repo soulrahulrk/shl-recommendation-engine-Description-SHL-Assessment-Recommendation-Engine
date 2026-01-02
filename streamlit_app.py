@@ -1,15 +1,19 @@
 """
-Phase 5: Streamlit Frontend for SHL Assessment Recommendations
+Memory-Optimized Streamlit App for Free Tier Deployments
+Designed to work within 512MB RAM limit
 
-Features:
-- Text input for job descriptions
-- URL input for job postings
-- Results display with test types and links
+Key optimizations:
+1. Lazy model loading - only when needed
+2. Smaller embedding model option
+3. LLM features optional (can disable to save memory)
+4. Efficient caching strategy
 """
 
 import sys
+import os
 from pathlib import Path
 from typing import Optional
+import gc
 
 import streamlit as st
 
@@ -61,33 +65,35 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# Initialize session state
+# Memory-optimized loading with lazy initialization
 @st.cache_resource
 def load_vector_store():
-    """Load vector store (cached) - builds if not exists"""
+    """Load vector store (cached) - only loads pre-built index"""
     data_dir = str(Path(__file__).parent / "data")
     store = SHLVectorStore(data_dir=data_dir)
     
-    # Check if vector store exists
+    # Only load pre-built index (don't build if missing)
     vector_store_path = Path(data_dir) / "vector_store.faiss"
     if not vector_store_path.exists():
-        st.info("Building vector store for first time... This takes ~2 minutes.")
-        # Build index from JSON data
-        store.build_index()
-        store.save()
-        st.success("Vector store built successfully!")
-    else:
-        store.load()
+        st.error("Vector store not found! Please ensure data/vector_store.faiss exists.")
+        st.stop()
     
+    store.load()
     return store
 
 
 @st.cache_resource
-def load_reranker():
-    """Load LLM reranker if available (cached)"""
+def load_reranker(_enable_llm: bool = True):
+    """Load LLM reranker only if enabled and available (cached)"""
+    if not _enable_llm:
+        return None
     if not LLM_AVAILABLE:
         return None
     try:
+        # Only load if API key exists
+        api_key = os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY")
+        if not api_key:
+            return None
         return LLMReranker()
     except Exception as e:
         st.warning(f"LLM reranker not available: {e}")
@@ -96,19 +102,16 @@ def load_reranker():
 
 def get_test_type_badge(test_type: str) -> str:
     """Generate badge HTML for test type"""
-    soft_skills = ["P", "B", "A", "S"]  # Personality, Behavioral, Ability (soft), Simulation
-    
-    # Check if it's a soft skill type
+    soft_skills = ["P", "B", "A", "S"]
     is_soft = any(test_type.startswith(s) or s in test_type for s in soft_skills)
     badge_class = "soft-skill" if is_soft else "hard-skill"
-    
     return f'<span class="test-type-badge {badge_class}">{test_type}</span>'
 
 
-def recommend(query: str, top_k: int = 10, use_llm: bool = True) -> list:
+def recommend(query: str, top_k: int = 10, use_llm: bool = True) -> tuple:
     """Get recommendations for a query"""
     vector_store = load_vector_store()
-    reranker = load_reranker() if use_llm else None
+    reranker = load_reranker(use_llm) if use_llm else None
     
     # Semantic search
     candidate_pool = 20 if use_llm and reranker else top_k
@@ -116,9 +119,12 @@ def recommend(query: str, top_k: int = 10, use_llm: bool = True) -> list:
     
     # LLM re-ranking if available
     if use_llm and reranker:
-        result = reranker.rerank(query, candidates, top_k=top_k)
-        if result.get("recommendations"):
-            return result["recommendations"], "semantic+llm_rerank"
+        try:
+            result = reranker.rerank(query, candidates, top_k=top_k)
+            if result.get("recommendations"):
+                return result["recommendations"], "semantic+llm_rerank"
+        except Exception as e:
+            st.warning(f"LLM re-ranking failed: {e}. Using semantic search only.")
     
     # Fallback to semantic results
     recommendations = [
@@ -142,124 +148,126 @@ def main():
     st.title("🎯 SHL Assessment Recommendation Engine")
     st.markdown("""
     Find the perfect SHL assessments for your hiring needs. Enter a job description 
-    or requirements below, and get intelligent recommendations powered by semantic search 
-    and LLM re-ranking.
+    or requirements below, and get intelligent recommendations.
     """)
     
     # Sidebar settings
     with st.sidebar:
         st.header("⚙️ Settings")
         
-        top_k = st.slider("Number of recommendations", 1, 20, 10)
-        use_llm = st.checkbox("Use LLM re-ranking", value=True, 
-                              help="Use AI to re-rank and balance recommendations")
+        # Number of recommendations
+        top_k = st.slider("Number of recommendations", min_value=1, max_value=20, value=10)
         
-        st.markdown("---")
-        st.markdown("### About")
+        # LLM re-ranking toggle
+        use_llm = st.checkbox(
+            "Enable LLM Re-ranking", 
+            value=True,
+            help="Uses AI to improve and balance recommendations. Disable to save memory."
+        )
+        
+        if use_llm and not LLM_AVAILABLE:
+            st.warning("⚠️ LLM re-ranking not available (missing dependencies)")
+        
+        st.divider()
+        
+        # Info
+        st.markdown("### 📊 System Info")
+        vector_store = load_vector_store()
+        st.metric("Total Assessments", len(vector_store.metadata))
+        
+        st.divider()
+        st.markdown("### 💡 Tips")
         st.markdown("""
-        This tool uses:
-        - **Semantic search** with sentence-transformers
-        - **LLM re-ranking** with Groq (Llama-3.3-70B)
-        - **518 SHL assessments** in the database
+        - Be specific about required skills
+        - Mention job level (entry, mid, senior)
+        - Include both technical and soft skills
         """)
-        
-        # Status
-        st.markdown("---")
-        st.markdown("### Status")
-        try:
-            store = load_vector_store()
-            st.success(f"✓ {len(store.metadata)} assessments loaded")
-        except:
-            st.error("✗ Vector store not loaded")
-        
-        reranker = load_reranker()
-        if reranker:
-            st.success("✓ LLM reranker ready")
-        else:
-            st.warning("⚠ LLM reranker not available")
     
-    # Input section
-    st.header("📝 Enter Your Requirements")
+    # Main content
+    col1, col2 = st.columns([2, 1])
     
-    tab1, tab2 = st.tabs(["Text Input", "Example Queries"])
-    
-    with tab1:
+    with col1:
+        st.subheader("📝 Enter Job Requirements")
         query = st.text_area(
-            "Job Description or Requirements",
+            "Describe the position or paste a job description:",
             height=150,
-            placeholder="Example: I am hiring for Java developers who can also collaborate effectively with my business teams. Looking for an assessment that can be completed in 40 minutes."
+            placeholder="Example: Looking for a senior Java developer with strong communication skills and team collaboration abilities for our enterprise software team..."
         )
     
-    with tab2:
-        example_queries = [
-            "I am hiring for Java developers who can also collaborate effectively with my business teams. Looking for an assessment that can be completed in 40 minutes.",
-            "Need to assess customer service representatives on communication skills and problem-solving ability.",
-            "Entry-level data analyst position requiring SQL and Excel skills with strong attention to detail.",
-            "Senior project manager role requiring leadership, stakeholder management, and strategic thinking.",
-            "Looking for assessments for a software engineering team lead who needs both technical and people skills."
+    with col2:
+        st.subheader("🚀 Quick Examples")
+        examples = [
+            "Java developer with business collaboration",
+            "Entry-level sales with communication",
+            "Python & SQL programming skills",
+            "Executive leadership assessment",
+            "Customer service for retail"
         ]
         
-        selected_example = st.selectbox("Select an example query", [""] + example_queries)
-        if selected_example:
-            query = selected_example
+        for example in examples:
+            if st.button(example, key=f"ex_{example[:20]}"):
+                query = example
+                st.rerun()
     
-    # Submit button
-    col1, col2, col3 = st.columns([1, 1, 3])
-    with col1:
-        submit = st.button("🔍 Get Recommendations", type="primary", use_container_width=True)
-    
-    # Results section
-    if submit and query:
-        with st.spinner("Finding best assessments..."):
-            recommendations, method = recommend(query, top_k=top_k, use_llm=use_llm)
-        
-        st.markdown("---")
-        st.header("🎯 Recommended Assessments")
-        st.caption(f"Method: {method.replace('_', ' ').title()}")
-        
-        if not recommendations:
-            st.warning("No recommendations found. Try a different query.")
+    # Search button
+    if st.button("🔍 Get Recommendations", type="primary", use_container_width=True):
+        if not query or len(query.strip()) < 10:
+            st.warning("⚠️ Please enter a more detailed job description (at least 10 characters)")
         else:
-            # Display as cards
-            for rec in recommendations:
-                with st.container():
-                    col1, col2 = st.columns([4, 1])
-                    
-                    with col1:
-                        st.markdown(f"### {rec['rank']}. [{rec['assessment_name']}]({rec['url']})")
+            with st.spinner("Finding best assessments..."):
+                recommendations, method = recommend(query, top_k=top_k, use_llm=use_llm)
+                
+                # Display results
+                st.success(f"Found {len(recommendations)} recommendations using {method}")
+                
+                # Results
+                st.subheader("📋 Recommended Assessments")
+                
+                for rec in recommendations:
+                    with st.container():
+                        st.markdown(f"""
+                        <div class="recommendation-card">
+                            <h4>#{rec['rank']}. {rec['assessment_name']}</h4>
+                        </div>
+                        """, unsafe_allow_html=True)
                         
-                        # Test types as badges
-                        test_types = rec.get("test_types", [])
-                        if test_types:
-                            badges_html = " ".join(get_test_type_badge(t) for t in test_types)
-                            st.markdown(badges_html, unsafe_allow_html=True)
+                        col_a, col_b, col_c = st.columns([2, 1, 1])
+                        
+                        with col_a:
+                            # Test types
+                            if rec.get('test_types'):
+                                badges = " ".join([get_test_type_badge(t) for t in rec['test_types'][:5]])
+                                st.markdown(f"**Types:** {badges}", unsafe_allow_html=True)
+                        
+                        with col_b:
+                            if rec.get('duration'):
+                                st.markdown(f"**Duration:** {rec['duration']}")
+                        
+                        with col_c:
+                            if rec.get('remote_testing'):
+                                st.markdown(f"**Remote:** {rec['remote_testing']}")
                         
                         # Reason
-                        if rec.get("reason"):
-                            st.caption(f"💡 {rec['reason']}")
-                    
-                    with col2:
-                        # Duration and other info
-                        if rec.get("duration"):
-                            st.metric("Duration", rec["duration"])
-                        if rec.get("remote_testing") == "Yes":
-                            st.success("🌐 Remote")
-                    
-                    st.markdown("---")
-            
-            # Download results
-            import json
-            results_json = json.dumps(recommendations, indent=2)
-            st.download_button(
-                "📥 Download Results (JSON)",
-                results_json,
-                "recommendations.json",
-                "application/json"
-            )
-    
-    elif submit:
-        st.warning("Please enter a job description or requirements.")
+                        if rec.get('reason'):
+                            with st.expander("Why this assessment?"):
+                                st.markdown(rec['reason'])
+                        
+                        # Link
+                        if rec.get('url'):
+                            st.markdown(f"[View Assessment Details →]({rec['url']})")
+                        
+                        st.divider()
+                
+                # Download results
+                st.download_button(
+                    label="📥 Download Results (JSON)",
+                    data=str(recommendations),
+                    file_name="shl_recommendations.json",
+                    mime="application/json"
+                )
 
 
 if __name__ == "__main__":
+    # Force garbage collection to free memory
+    gc.collect()
     main()

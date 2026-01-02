@@ -226,5 +226,5 @@ The system demonstrates strong semantic understanding, skill balancing, and scal
 
 ---
 
-*Document by: [Your Name]*
+*Document by: rahul*
 *Date: December 17, 2025*
